@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // 用戶profile:自己可以讀寫自己嗰份,Admin可以改(例如停用帳戶),其他人得讀
+    match /users/{uid} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == uid;
+      allow update: if request.auth != null && (request.auth.uid == uid || isAdmin());
+      allow delete: if false;
+    }
+
+    // 教練資料:任何人都可以讀(瀏覽教練list);淨係嗰個教練本人或者Admin先可以改/刪
+    match /coaches/{coachId} {
+      allow read: if true;
+      allow create, update: if request.auth != null && (request.auth.uid == coachId || isAdmin());
+      allow delete: if request.auth != null && (request.auth.uid == coachId || isAdmin());
+    }
+    match /demo_coaches/{coachId} {
+      allow read: if true;
+      allow create, update: if request.auth != null && (request.auth.uid == coachId || isAdmin());
+      allow delete: if request.auth != null && (request.auth.uid == coachId || isAdmin());
+    }
+
+    // 預約:讀取暫時要全部攞返嚟本地篩(app用onSnapshot聽成個collection),寫入淨係嗰單嘅學員/教練/Admin先可以改
+    match /bookings/{bookingId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.studentId;
+      allow update: if request.auth != null &&
+        (request.auth.uid == resource.data.studentId || request.auth.uid == resource.data.coachId || isAdmin());
+      allow delete: if isAdmin();
+    }
+    match /demo_bookings/{bookingId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.studentId;
+      allow update: if request.auth != null &&
+        (request.auth.uid == resource.data.studentId || request.auth.uid == resource.data.coachId || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // 評價:任何人可讀,登入用戶可留(唔可以改/刪自己或者人哋嘅評價,淨係Admin可以喺糾紛處理時刪)
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+
+    // 舉報/糾紛:登入用戶可讀、可以自己身份提交舉報;淨係Admin可以更新(標記結案)
+    match /reports/{reportId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.reporterId;
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+  }
+}

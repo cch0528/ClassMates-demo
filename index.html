@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClassMates — 登入</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Noto+Sans+HK:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=1783147793">
+</head>
+<body>
+<div id="demoBanner" style="display:none;background:#FFD966;color:#3a2f00;text-align:center;font-weight:700;font-size:.78rem;padding:6px 10px">🟡 DEMO模式 — 呢度所有資料都係假嘅,唔係真實用戶</div>
+<div class="loginwrap">
+  <div class="logo">Class<span>Mates</span></div>
+  <div class="tag">興趣班・搵教練・即刻book</div>
+
+  <div class="rolepick" id="rolepick" style="grid-template-columns:1fr 1fr">
+    <div class="rp on" data-r="student">🙋 學員</div>
+    <div class="rp" data-r="coach">🏋️ 教練</div>
+  </div>
+
+  <div class="frm">
+    <label>Email</label>
+    <input id="email" type="email" placeholder="you@email.com" autocomplete="username">
+    <label>密碼</label>
+    <input id="pw" type="password" placeholder="••••" autocomplete="current-password">
+    <label id="nameRow">你嘅名/稱呼 <small style="font-weight:400">(只註冊時需要)</small></label>
+    <input id="regName" placeholder="例:陳大文">
+    <label id="agreeRow" style="display:flex;flex-direction:row;align-items:center;gap:8px;font-size:.82rem;color:var(--ink-2)">
+      <input type="checkbox" id="agreeTerms" style="width:auto"> 我已閱讀並同意 <a href="terms.html" target="_blank" style="color:var(--green)">條款及細則</a>(只註冊時需要)
+    </label>
+    <button class="btn primary block" id="loginBtn">登入</button>
+    <button class="btn ghost block" id="regBtn">註冊新帳戶</button>
+    <button class="btn ghost block" id="quickBtn" style="border-style:dashed">⚡ 快速Demo登入(免Email/密碼)</button>
+  </div>
+
+  <div class="hint">
+    真實帳戶經Firebase Authentication建立,密碼最少6個字。教練註冊後需等Admin喺後台審批,先會喺平台出現畀學員搜尋到。
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script src="firebase-init.js?v=1783147793"></script>
+<script src="app.js?v=1783147793"></script>
+<script>
+if(IS_DEMO) document.getElementById("demoBanner").style.display = "";
+else document.getElementById("quickBtn").style.display = "none";
+
+let role = "student";
+const dest = r => ({student:"student.html", coach:"coach.html"}[r]);
+const roleName = r => ({student:"學員", coach:"教練"}[r]);
+
+document.querySelectorAll("#rolepick .rp").forEach(el=>{
+  el.onclick = ()=>{
+    document.querySelectorAll("#rolepick .rp").forEach(x=>x.classList.remove("on"));
+    el.classList.add("on"); role = el.dataset.r;
+  };
+});
+
+/* ---------- Firebase Auth + Firestore profile ---------- */
+async function doLogin(){
+  const email = document.getElementById("email").value.trim().toLowerCase();
+  const pw = document.getElementById("pw").value;
+  if(!email||!pw) return toast("填埋Email同密碼先");
+  try{
+    const cred = await fbAuth.signInWithEmailAndPassword(email, pw);
+    const profile = await fbGetProfile(cred.user.uid);
+    if(!profile) return toast("搵唔到帳戶資料,請聯絡平台");
+    if(profile.role!==role) return toast(`呢個帳戶係「${roleName(profile.role)}」,請揀返啱嘅身份`);
+    Session.set({uid:cred.user.uid, role:profile.role, name:profile.name});
+    // 同步落local DB(demo層),等其餘頁面睇到呢個user嘅基本資料
+    DB.update(d=>{
+      if(!d.users.find(x=>x.uid===cred.user.uid)){
+        d.users.push({uid:cred.user.uid, role:profile.role, name:profile.name, email, pw:"", status:"active"});
+        if(profile.role==="coach" && !d.coaches.find(c=>c.uid===cred.user.uid)){
+          d.coaches.push({uid:cred.user.uid, name:profile.name, em:"🏅", cat:"other", sub:"", region:d.regions[0], bio:"", quals:[], lessons:0,
+            rating:0, ratingCount:0, bookingCount:0, approved:false, confirmMode:"default",
+            featured:{pinned:false,pinOrder:0}, fps:"", payme:"", classes:[]});
+        }
+      }
+    });
+    location.href = dest(profile.role);
+  }catch(e){ toast("登入失敗:"+(e.message||e.code)); }
+}
+async function doRegister(){
+  const email = document.getElementById("email").value.trim().toLowerCase();
+  const pw = document.getElementById("pw").value;
+  const name = document.getElementById("regName").value.trim();
+  if(!email||!pw) return toast("填埋Email同密碼先");
+  if(pw.length<6) return toast("密碼最少6個字");
+  if(!name) return toast("填埋你嘅名先");
+  if(!document.getElementById("agreeTerms").checked) return toast("要先同意條款及細則");
+  try{
+    const cred = await fbAuth.createUserWithEmailAndPassword(email, pw);
+    await fbCreateProfile(cred.user.uid, {name, email, role, agreedTermsAt:new Date().toISOString()});
+    let newCoach = null;
+    DB.update(d=>{
+      d.users.push({uid:cred.user.uid, role, name, email, pw:"", status:"active", agreedTermsAt:new Date().toISOString()});
+      if(role==="coach"){
+        newCoach = {uid:cred.user.uid, name, em:"🏅", cat:"other", sub:"", region:d.regions[0], bio:"", quals:[], lessons:0,
+          rating:0, ratingCount:0, bookingCount:0, approved:false, verified:false, confirmMode:"default",
+          featured:{pinned:false,pinOrder:0}, fps:"", payme:"", classes:[]};
+        d.coaches.push(newCoach);
+      }
+    });
+    if(newCoach) FS.pushCoach(newCoach);
+    Session.set({uid:cred.user.uid, role, name});
+    toast(role==="coach" ? "已註冊!教練帳戶需等Admin審批先會喺平台出現" : "註冊成功!");
+    setTimeout(()=>location.href = dest(role), 900);
+  }catch(e){ toast("註冊失敗:"+(e.message||e.code)); }
+}
+
+document.getElementById("loginBtn").onclick = doLogin;
+document.getElementById("regBtn").onclick = doRegister;
+
+/* ---------- 快速Demo登入(用Firebase匿名登入,免Email/密碼但仍然係真Auth,寫得入Firestore) ---------- */
+document.getElementById("quickBtn").onclick = async ()=>{
+  try{
+    const cred = await fbAuth.signInAnonymously();
+    let profile = await fbGetProfile(cred.user.uid);
+    if(!profile){
+      const name = role==="coach" ? "Demo教練"+cred.user.uid.slice(-4) : "Demo學員"+cred.user.uid.slice(-4);
+      profile = {name, email:"", role, agreedTermsAt:new Date().toISOString()};
+      await fbCreateProfile(cred.user.uid, profile);
+    }
+    Session.set({uid:cred.user.uid, role:profile.role, name:profile.name});
+    let newCoach = null;
+    DB.update(d=>{
+      if(!d.users.find(x=>x.uid===cred.user.uid)){
+        d.users.push({uid:cred.user.uid, role:profile.role, name:profile.name, email:"", pw:"", status:"active"});
+      }
+      if(profile.role==="coach" && !d.coaches.find(c=>c.uid===cred.user.uid)){
+        newCoach = {uid:cred.user.uid, name:profile.name, em:"🏅", cat:"other", sub:"", region:d.regions[0], bio:"", quals:[], lessons:0,
+          rating:0, ratingCount:0, bookingCount:0, approved:false, verified:false, confirmMode:"default",
+          featured:{pinned:false,pinOrder:0}, fps:"", payme:"", classes:[]};
+        d.coaches.push(newCoach);
+      }
+    });
+    if(newCoach) FS.pushCoach(newCoach);
+    location.href = dest(profile.role);
+  }catch(e){ toast("快速登入失敗:"+(e.message||e.code)+"(可能未開Anonymous登入方式)"); }
+};
+</script>
+</body>
+</html>

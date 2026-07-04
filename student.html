@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClassMates — 學員</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Noto+Sans+HK:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=1783147793">
+</head>
+<body>
+<div id="demoBanner" style="display:none;background:#FFD966;color:#3a2f00;text-align:center;font-weight:700;font-size:.78rem;padding:6px 10px">🟡 DEMO模式 — 呢度所有資料都係假嘅,唔係真實用戶</div>
+<div class="app">
+  <div class="topbar">
+    <div class="logo">Class<span>Mates</span></div>
+    <div class="spacer"></div>
+    <div class="who" id="who"></div>
+    <button class="iconbtn" onclick="logout()">登出</button>
+  </div>
+
+  <!-- ===== 首頁 ===== -->
+  <div class="page on" id="pg-home">
+    <div class="search">
+      <input id="q" placeholder="搜尋教練 / 活動…" oninput="doSearch()">
+    </div>
+    <div id="searchResults"></div>
+
+    <div id="homeBody">
+      <div class="sec-title">活動分類</div>
+      <div class="cats" id="cats"></div>
+
+      <div class="sec-title">推介教練 <small>精選 + 高評分</small></div>
+      <div class="hscroll" id="featured"></div>
+    </div>
+  </div>
+
+  <!-- ===== 分類/教練list ===== -->
+  <div class="page" id="pg-browse">
+    <div class="crumb" id="crumb" onclick="backCrumb()">← 返回</div>
+    <h2 class="disp" id="browseTitle" style="margin:6px 0 4px"></h2>
+    <div id="subWrap" class="sublist"></div>
+    <div id="listWrap" style="display:none">
+      <div class="filters" id="filters"></div>
+      <div class="clist" id="coachList"></div>
+      <div class="empty" id="listEmpty" style="display:none">呢度暫時未有教練</div>
+    </div>
+  </div>
+
+  <!-- ===== 我的預約 ===== -->
+  <div class="page" id="pg-book">
+    <div class="sec-title" style="font-size:1.2rem">我的預約</div>
+    <div class="tabs" id="btabs">
+      <div class="tab on" data-t="up">即將嚟緊</div>
+      <div class="tab" data-t="done">已完成</div>
+      <div class="tab" data-t="cancel">已取消</div>
+    </div>
+    <div id="bookList"></div>
+  </div>
+
+  <div class="bottomnav"><div class="inner">
+    <button class="on" data-p="home" onclick="nav('home',this)"><span class="em">🏠</span>首頁</button>
+    <button data-p="book" onclick="nav('book',this)"><span class="em">📅</span>我的預約</button>
+  </div></div>
+</div>
+
+<!-- 教練詳情 sheet -->
+<div class="sheet-mask" id="detailMask" onclick="if(event.target===this)closeSheet('detailMask')">
+  <div class="sheet" id="detailSheet"></div>
+</div>
+<!-- 預約表單 sheet -->
+<div class="sheet-mask" id="formMask" onclick="if(event.target===this)closeSheet('formMask')">
+  <div class="sheet" id="formSheet"></div>
+</div>
+<!-- 上傳付款證明 sheet -->
+<div class="sheet-mask" id="proofMask" onclick="if(event.target===this)closeSheet('proofMask')">
+  <div class="sheet" id="proofSheet"></div>
+</div>
+<!-- 評價 sheet -->
+<div class="sheet-mask" id="rateMask" onclick="if(event.target===this)closeSheet('rateMask')">
+  <div class="sheet" id="rateSheet"></div>
+</div>
+<!-- 舉報/事故 sheet -->
+<div class="sheet-mask" id="reportMask" onclick="if(event.target===this)closeSheet('reportMask')">
+  <div class="sheet" id="reportSheet"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script src="firebase-init.js?v=1783147793"></script>
+<script src="app.js?v=1783147793"></script>
+<script>
+if(IS_DEMO) document.getElementById("demoBanner").style.display = "";
+const me = requireRole("student");
+document.getElementById("who").textContent = "Hi, " + me.name;
+
+/* ---------- nav ---------- */
+function nav(p, btn){
+  document.querySelectorAll(".page").forEach(x=>x.classList.remove("on"));
+  document.getElementById("pg-"+p).classList.add("on");
+  document.querySelectorAll(".bottomnav button").forEach(x=>x.classList.remove("on"));
+  if(btn) btn.classList.add("on");
+  if(p==="book") renderBookings();
+  if(p==="home"){ renderHome(); }
+}
+function closeSheet(id){ document.getElementById(id).classList.remove("on"); }
+function openSheet(id){ document.getElementById(id).classList.add("on"); }
+
+/* ---------- home ---------- */
+function renderHome(){
+  const db = DB.get();
+  const catsEl = document.getElementById("cats");
+  catsEl.innerHTML = db.cats.map(c=>`
+    <div class="cat" onclick="openCat('${c.id}')">
+      <span class="em">${c.em}</span><span class="nm">${c.name}</span>
+    </div>`).join("");
+  const feat = featuredCoaches(db).slice(0,8);
+  document.getElementById("featured").innerHTML = feat.map(c=>`
+    <div class="fcard" onclick="openCoach('${c.uid}')">
+      <div class="ph">${c.em}${c.featured&&c.featured.pinned?'<span class="pin">精選</span>':""}</div>
+      <div class="bd">
+        <div class="nm">${c.name}</div>
+        <div class="mt">${c.sub||"多項"} · ⭐${c.rating||"–"} · 📍${c.region}</div>
+      </div>
+    </div>`).join("");
+}
+function doSearch(){
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const res = document.getElementById("searchResults");
+  const home = document.getElementById("homeBody");
+  if(!q){ res.innerHTML=""; home.style.display=""; return; }
+  home.style.display="none";
+  const db = DB.get();
+  const hits = db.coaches.filter(c=>c.approved && (
+    c.name.toLowerCase().includes(q) || (c.sub||"").toLowerCase().includes(q) || (c.bio||"").toLowerCase().includes(q)));
+  res.innerHTML = hits.length
+    ? `<div class="sec-title">搜尋結果</div><div class="clist">${hits.map(coachCard).join("")}</div>`
+    : `<div class="empty">搵唔到「${q}」相關嘅教練</div>`;
+}
+
+/* ---------- browse: cat → sub → list ---------- */
+let curCat=null, curSub=null;
+let flt = {regions:[], maxPrice:1000, minRating:0};
+
+function openCat(id){
+  const db = DB.get();
+  curCat = db.cats.find(c=>c.id===id);
+  flt = {regions:[], maxPrice:1000, minRating:0};
+  nav("browse");
+  document.querySelectorAll(".bottomnav button").forEach(x=>x.classList.remove("on"));
+  if(curCat.id==="other" || !curCat.subs.length){ curSub=null; showList(); }
+  else showSubs();
+}
+function showSubs(){
+  curSub = null;
+  document.getElementById("browseTitle").textContent = curCat.em+" "+curCat.name;
+  document.getElementById("crumb").textContent = "← 返回首頁";
+  document.getElementById("listWrap").style.display="none";
+  const el = document.getElementById("subWrap");
+  el.style.display="";
+  el.innerHTML = curCat.subs.map(s=>`<div class="subitem" onclick="openSub('${s}')"><span>${s}</span><span class="ar">›</span></div>`).join("");
+}
+function openSub(s){ curSub = s; showList(); }
+function showList(){
+  document.getElementById("browseTitle").textContent = curSub ? curCat.em+" "+curSub : curCat.em+" "+curCat.name;
+  document.getElementById("crumb").textContent = curSub ? "← 返回"+curCat.name : "← 返回首頁";
+  document.getElementById("subWrap").style.display="none";
+  document.getElementById("listWrap").style.display="";
+  renderFilters(); renderList();
+}
+function backCrumb(){
+  if(curSub){ showSubs(); }
+  else nav("home", document.querySelector('.bottomnav button[data-p="home"]'));
+}
+function renderFilters(){
+  const db = DB.get();
+  const el = document.getElementById("filters");
+  el.innerHTML = `
+    <div class="fchip ${flt.regions.length?"on":""}" onclick="pickRegions()">📍 地區${flt.regions.length?` (${flt.regions.length})`:""}</div>
+    <div class="fchip ${flt.maxPrice<1000?"on":""}" onclick="pickPrice()">💰 ≤$${flt.maxPrice}</div>
+    <div class="fchip ${flt.minRating>0?"on":""}" onclick="cycleRating()">⭐ ${flt.minRating>0?flt.minRating+"星以上":"評分"}</div>
+    ${(flt.regions.length||flt.maxPrice<1000||flt.minRating>0)?'<div class="fchip" onclick="clearFlt()">✕ 清除</div>':""}`;
+}
+function pickRegions(){
+  const db = DB.get();
+  const cur = flt.regions.join(",");
+  const input = prompt("輸入地區(可多個,用逗號分隔):\n"+db.regions.join("、"), cur);
+  if(input===null) return;
+  flt.regions = input.split(/[,、]/).map(s=>s.trim()).filter(s=>db.regions.includes(s));
+  renderFilters(); renderList();
+}
+function pickPrice(){
+  const v = prompt("最高時薪($):", flt.maxPrice);
+  if(v===null) return;
+  flt.maxPrice = Math.max(0, parseInt(v)||1000);
+  renderFilters(); renderList();
+}
+function cycleRating(){
+  flt.minRating = {0:4, 4:3, 3:0}[flt.minRating];
+  renderFilters(); renderList();
+}
+function clearFlt(){ flt={regions:[],maxPrice:1000,minRating:0}; renderFilters(); renderList(); }
+
+function matchCat(c){
+  if(curCat.id==="other") return c.cat==="other";
+  if(curSub) return c.cat===curCat.id && c.sub===curSub;
+  return c.cat===curCat.id;
+}
+function coachCard(c){
+  const minRate = Math.min(...c.classes.map(x=>x.rate));
+  return `<div class="ccard" onclick="openCoach('${c.uid}')">
+    <div class="ph">${c.em}</div>
+    <div class="bd">
+      <div class="nm">${c.name} <span class="badge">✓${c.lessons}堂</span>${c.verified?'<span class="verified">🛡️已驗證</span>':""}</div>
+      <div class="stars">${starsStr(c.rating)} <small>${c.rating||"–"} (${c.ratingCount})</small></div>
+      <div class="mt">📍${c.region} · $${isFinite(minRate)?minRate:"–"}/hr起</div>
+    </div></div>`;
+}
+function renderList(){
+  const db = DB.get();
+  const list = db.coaches.filter(c=>c.approved && matchCat(c))
+    .filter(c=>!flt.regions.length || flt.regions.includes(c.region))
+    .filter(c=>c.classes.some(x=>x.rate<=flt.maxPrice) || !c.classes.length)
+    .filter(c=>(c.rating||0)>=flt.minRating);
+  document.getElementById("coachList").innerHTML = list.map(coachCard).join("");
+  document.getElementById("listEmpty").style.display = list.length?"none":"";
+}
+
+/* ---------- coach detail ---------- */
+let curCoach=null, curClass=null, curSlot=null, curDayIdx=0;
+function openCoach(uid){
+  const db = DB.get();
+  curCoach = db.coaches.find(c=>c.uid===uid);
+  curClass = curCoach.classes[0]||null;
+  curSlot=null; curDayIdx=0;
+  renderDetail();
+  openSheet("detailMask");
+}
+function renderDetail(){
+  const db = DB.get();
+  const c = curCoach;
+  const reviews = db.reviews.filter(r=>r.coachId===c.uid).slice(-3).reverse();
+  const mode = effectiveConfirmMode(c, db);
+  let html = `
+    <div class="grab"></div>
+    <div class="dhead">
+      <div class="av">${c.em}</div>
+      <div>
+        <h2>${c.name}${c.verified?'<span class="verified" style="margin-left:6px">🛡️已驗證資歷</span>':""}</h2>
+        <div class="stars">${starsStr(c.rating)} ${c.rating||"–"} (${c.ratingCount}) · ✓已授課${c.lessons}堂</div>
+        <div class="mt">📍${c.region} · ${mode==="auto"?"⚡上傳付款即自動確認":"🕐 教練核實付款後確認"}</div>
+      </div>
+    </div>
+    <div class="dbio">
+      ${c.bio||"（未有簡介）"}
+      ${c.quals&&c.quals.length?`<ul>${c.quals.map(q=>`<li>${q}</li>`).join("")}</ul>`:""}
+    </div>`;
+
+  if(!c.classes.length){
+    html += `<div class="empty">教練未開放任何班別</div>`;
+  }else{
+    html += `<div class="tabs">${c.classes.map(cl=>`
+      <div class="tab ${curClass&&curClass.id===cl.id?"on":""}" onclick="pickClass('${cl.id}')">${cl.ageGroup}</div>`).join("")}</div>`;
+    const cl = curClass;
+    html += `<div class="price">$${cl.rate}<small>/hr</small>${cl.note?` <small>· ${cl.note}</small>`:""}</div>`;
+    const days = slotsForClass(c, cl, db);
+    if(!days.length) html += `<div class="empty">未來兩星期未有開放時段</div>`;
+    else{
+      if(curDayIdx>=days.length) curDayIdx=0;
+      html += `<div class="days">${days.map((d,i)=>`
+        <div class="day ${i===curDayIdx?"on":""}" onclick="pickDay(${i})">
+          <div class="dw">${["日","一","二","三","四","五","六"][d.date.getDay()]}</div>
+          <div class="dd">${d.date.getDate()}</div>
+        </div>`).join("")}</div>`;
+      const day = days[curDayIdx];
+      html += `<div class="slots">${day.slots.map(s=>`
+        <div class="slot ${s.taken?"full":(curSlot===s.iso?"on":"")}" ${s.taken?"":`onclick="pickSlot('${s.iso}')"`}>${s.time}</div>`).join("")}</div>`;
+    }
+    html += `<div style="margin-top:16px"><button class="btn primary block" ${curSlot?"":"disabled"} onclick="openBookingForm()">立即預約</button></div>`;
+  }
+  html += `<div style="margin-top:10px;text-align:center"><span class="crumb" onclick="openReport('${c.uid}','')">🚩 舉報呢個教練</span></div>`;
+  if(reviews.length){
+    html += `<div class="sec-title">學員評價</div>` + reviews.map(r=>`
+      <div class="bcard"><div class="row1"><div class="nm">${r.studentName}</div><div class="stars" style="color:var(--yellow);font-size:.85rem">${starsStr(r.stars)}</div></div>
+      <div class="mt">${r.comment||""}</div></div>`).join("");
+  }
+  document.getElementById("detailSheet").innerHTML = html;
+}
+function pickClass(id){ curClass = curCoach.classes.find(x=>x.id===id); curSlot=null; curDayIdx=0; renderDetail(); }
+function pickDay(i){ curDayIdx=i; curSlot=null; renderDetail(); }
+function pickSlot(iso){ curSlot=iso; renderDetail(); }
+
+/* ---------- booking form ---------- */
+function openBookingForm(){
+  const c = curCoach, cl = curClass;
+  document.getElementById("formSheet").innerHTML = `
+    <div class="grab"></div>
+    <h2>預約 ${c.name}</h2>
+    <div class="mt" style="color:var(--ink-2);font-size:.85rem;margin-top:4px">
+      ${cl.ageGroup} · ${fmtDT(curSlot)} · $${cl.rate}/hr</div>
+    <div class="frm">
+      <label>姓名</label><input id="f_name" value="${me.name}">
+      <label>電話</label><input id="f_phone" placeholder="9xxx xxxx">
+      <label>學員年齡(如替小朋友報)</label><input id="f_age" oninput="toggleGuardian()" placeholder="例:9">
+      <div id="guardianBlock" style="display:none">
+        <label>監護人姓名</label><input id="f_guardian" placeholder="家長/監護人姓名">
+        <label id="agreeRow2" style="display:flex;flex-direction:row;align-items:center;gap:8px;font-size:.8rem;color:var(--ink-2)">
+          <input type="checkbox" id="f_guardianAgree" style="width:auto">
+          本人為以上學員之家長/監護人,同意其參與此活動,並已閱讀<a href="terms.html" target="_blank" style="color:var(--green)">條款及細則</a>
+        </label>
+      </div>
+      <label>備註</label><textarea id="f_notes" rows="2" placeholder="有咩想教練知?"></textarea>
+      <div class="payinfo">
+        💸 <b>付款方法</b>(book完之後上傳截圖):<br>
+        FPS轉數快:<b>${c.fps||"—"}</b><br>
+        PayMe:<b>${c.payme||"—"}</b><br>
+        金額:<b>$${cl.rate}</b>
+      </div>
+      <button class="btn primary block" onclick="submitBooking()">確定送出</button>
+    </div>`;
+  openSheet("formMask");
+}
+function toggleGuardian(){
+  const age = parseInt(document.getElementById("f_age").value);
+  document.getElementById("guardianBlock").style.display = (age && age<18) ? "" : "none";
+}
+function submitBooking(){
+  const name = document.getElementById("f_name").value.trim();
+  const phone = document.getElementById("f_phone").value.trim();
+  if(!name||!phone) return toast("請填姓名同電話");
+  const age = parseInt(document.getElementById("f_age").value)||null;
+  let guardianName = "", agreedAt = "";
+  if(age && age<18){
+    guardianName = document.getElementById("f_guardian").value.trim();
+    if(!guardianName) return toast("未成年學員需填寫監護人姓名");
+    if(!document.getElementById("f_guardianAgree").checked) return toast("監護人需勾選同意方可繼續");
+    agreedAt = new Date().toISOString();
+  }
+  const id = DB.uid();
+  let newBooking, updatedCoach;
+  DB.update(db=>{
+    newBooking = {
+      id, studentId:me.uid, coachId:curCoach.uid, classId:curClass.id, datetime:curSlot,
+      status:"pending_payment", studentName:name, phone,
+      studentAge:document.getElementById("f_age").value.trim(),
+      guardianName, guardianAgreedAt:agreedAt,
+      notes:document.getElementById("f_notes").value.trim(),
+      proof:"", lateCancel:false, createdAt:new Date().toISOString()};
+    db.bookings.push(newBooking);
+    const c = db.coaches.find(x=>x.uid===curCoach.uid);
+    if(c){ c.bookingCount = (c.bookingCount||0)+1; updatedCoach = c; }
+  });
+  FS.pushBooking(newBooking);
+  FS.pushCoach(updatedCoach);
+  closeSheet("formMask"); closeSheet("detailMask");
+  toast("預約已建立!記得過數同上傳截圖");
+  nav("book", document.querySelector('.bottomnav button[data-p="book"]'));
+  setTimeout(()=>openProof(id), 400);
+}
+
+/* ---------- my bookings ---------- */
+let bTab = "up";
+document.querySelectorAll("#btabs .tab").forEach(t=>{
+  t.onclick = ()=>{ document.querySelectorAll("#btabs .tab").forEach(x=>x.classList.remove("on"));
+    t.classList.add("on"); bTab=t.dataset.t; renderBookings(); };
+});
+function renderBookings(){
+  const db = DB.get();
+  const mine = db.bookings.filter(b=>b.studentId===me.uid)
+    .sort((a,b)=>new Date(b.datetime)-new Date(a.datetime));
+  // 自動將過咗時間嘅confirmed變completed
+  let changed=false;
+  mine.forEach(b=>{ if(b.status==="confirmed" && new Date(b.datetime)<new Date()){ b.status="completed"; changed=true; }});
+  if(changed) DB.update(d=>{ d.bookings.forEach(x=>{ const m = mine.find(y=>y.id===x.id); if(m) x.status=m.status; }); });
+
+  const filt = {up:b=>["pending_payment","pending_verify","confirmed"].includes(b.status),
+                done:b=>b.status==="completed", cancel:b=>b.status==="cancelled"}[bTab];
+  const list = mine.filter(filt);
+  const el = document.getElementById("bookList");
+  if(!list.length){ el.innerHTML = `<div class="empty">暫時未有記錄</div>`; return; }
+  el.innerHTML = list.map(b=>{
+    const c = db.coaches.find(x=>x.uid===b.coachId)||{name:"?",em:"🏅"};
+    const cl = c.classes?c.classes.find(x=>x.id===b.classId):null;
+    const reviewed = db.reviews.some(r=>r.bookingId===b.id);
+    let acts = "";
+    if(b.status==="pending_payment") acts += `<button class="btn sm primary" onclick="openProof('${b.id}')">上傳付款證明</button>`;
+    if(["pending_payment","pending_verify","confirmed"].includes(b.status))
+      acts += `<button class="btn sm danger" onclick="cancelBooking('${b.id}')">取消預約</button>`;
+    if(b.status==="completed" && !reviewed)
+      acts += `<button class="btn sm ghost" onclick="openRate('${b.id}')">⭐ 留評價</button>`;
+    if(["confirmed","completed"].includes(b.status))
+      acts += `<button class="btn sm ghost" onclick="openReport('${c.uid}','${b.id}')">🚩 舉報/事故</button>`;
+    return `<div class="bcard">
+      <div class="row1"><div class="nm">${c.em} ${c.name}${cl?` · ${cl.ageGroup}`:""}</div>
+        <span class="st ${b.status}">${statusLabel(b.status)}</span></div>
+      <div class="mt">🕐 ${fmtDT(b.datetime)}${cl?` · $${cl.rate}`:""}</div>
+      ${b.proof?`<div class="mt">✓ 已上傳付款證明</div>`:""}
+      ${acts?`<div class="acts">${acts}</div>`:""}
+    </div>`;
+  }).join("");
+}
+function cancelBooking(id){
+  const db0 = DB.get();
+  const b0 = db0.bookings.find(x=>x.id===id);
+  const hoursLeft = (new Date(b0.datetime) - new Date())/3600000;
+  const isLate = hoursLeft < 24;
+  const msg = isLate
+    ? "距離開課少於24小時取消,將被標記為「late cancellation」交平台審核,教練可能收取部分費用。確定要取消?"
+    : "確定取消呢個預約?(24小時前取消,免手續費)";
+  if(!confirm(msg)) return;
+  let updated;
+  DB.update(db=>{ const b = db.bookings.find(x=>x.id===id); if(b){ b.status="cancelled"; b.lateCancel=isLate; updated=b; } });
+  FS.pushBooking(updated);
+  renderBookings(); toast(isLate?"已取消(已標記為late cancellation)":"已取消");
+}
+
+/* ---------- payment proof ---------- */
+function openProof(id){
+  const db = DB.get();
+  const b = db.bookings.find(x=>x.id===id);
+  const c = db.coaches.find(x=>x.uid===b.coachId);
+  const cl = c.classes.find(x=>x.id===b.classId);
+  document.getElementById("proofSheet").innerHTML = `
+    <div class="grab"></div>
+    <h2>上傳付款證明</h2>
+    <div class="payinfo" style="margin-top:10px">
+      FPS:<b>${c.fps||"—"}</b> · PayMe:<b>${c.payme||"—"}</b><br>金額:<b>$${cl?cl.rate:"—"}</b>
+    </div>
+    <div class="frm">
+      <label>付款截圖</label>
+      <input type="file" accept="image/*" id="proofFile">
+      <div id="proofPreview"></div>
+      <button class="btn primary block" onclick="submitProof('${id}')">送出</button>
+      <button class="btn ghost block" onclick="closeSheet('proofMask')">稍後先上傳</button>
+    </div>`;
+  document.getElementById("proofFile").onchange = e=>{
+    const f = e.target.files[0]; if(!f) return;
+    const r = new FileReader();
+    r.onload = ()=>{ window._proofData = r.result;
+      document.getElementById("proofPreview").innerHTML = `<img class="proofimg" src="${r.result}">`; };
+    r.readAsDataURL(f);
+  };
+  window._proofData = null;
+  openSheet("proofMask");
+}
+function submitProof(id){
+  if(!window._proofData) return toast("揀返張截圖先");
+  const db0 = DB.get();
+  const b0 = db0.bookings.find(x=>x.id===id);
+  const c0 = db0.coaches.find(x=>x.uid===b0.coachId);
+  const mode = effectiveConfirmMode(c0, db0);
+  let updated;
+  DB.update(db=>{
+    const b = db.bookings.find(x=>x.id===id);
+    b.proof = window._proofData;
+    b.status = mode==="auto" ? "confirmed" : "pending_verify";
+    updated = b;
+  });
+  FS.pushBooking(updated);
+  closeSheet("proofMask");
+  toast(mode==="auto" ? "已上傳,預約已確認!" : "已上傳,等教練核實");
+  renderBookings();
+}
+
+/* ---------- review ---------- */
+let rateStars = 5;
+function openRate(bid){
+  rateStars = 5;
+  document.getElementById("rateSheet").innerHTML = `
+    <div class="grab"></div>
+    <h2>留評價</h2>
+    <div class="frm">
+      <div class="starpick" id="starpick">${[1,2,3,4,5].map(i=>`<span data-i="${i}" class="on">★</span>`).join("")}</div>
+      <label>評語</label>
+      <textarea id="r_comment" rows="3" placeholder="上堂感受、教練點樣…"></textarea>
+      <button class="btn primary block" onclick="submitRate('${bid}')">送出評價</button>
+    </div>`;
+  document.querySelectorAll("#starpick span").forEach(s=>{
+    s.onclick = ()=>{ rateStars = +s.dataset.i;
+      document.querySelectorAll("#starpick span").forEach(x=>x.classList.toggle("on", +x.dataset.i<=rateStars)); };
+  });
+  openSheet("rateMask");
+}
+function submitRate(bid){
+  const comment = document.getElementById("r_comment").value.trim();
+  let updatedCoach;
+  DB.update(db=>{
+    const b = db.bookings.find(x=>x.id===bid);
+    db.reviews.push({id:DB.uid(), bookingId:bid, coachId:b.coachId, studentName:me.name,
+      stars:rateStars, comment, createdAt:new Date().toISOString()});
+    const c = db.coaches.find(x=>x.uid===b.coachId);
+    const total = (c.rating||0)*(c.ratingCount||0) + rateStars;
+    c.ratingCount = (c.ratingCount||0)+1;
+    c.rating = Math.round(total/c.ratingCount*10)/10;
+    updatedCoach = c;
+  });
+  FS.pushCoach(updatedCoach);
+  closeSheet("rateMask"); toast("多謝你嘅評價!"); renderBookings();
+}
+
+renderHome();
+FS.seedIfEmpty().then(()=> FS.initSync(()=>{
+  renderHome();
+  if(document.getElementById("pg-book").classList.contains("on")) renderBookings();
+  if(document.getElementById("pg-browse").classList.contains("on") && curCat) renderList();
+}));
+
+/* ---------- report / incident ---------- */
+function openReport(coachId, bookingId){
+  const db = DB.get();
+  const c = db.coaches.find(x=>x.uid===coachId);
+  document.getElementById("reportSheet").innerHTML = `
+    <div class="grab"></div>
+    <h2>舉報 / 事故報告</h2>
+    <div class="mt" style="color:var(--ink-2);font-size:.85rem;margin-top:4px">關於:${c?c.name:"教練"}</div>
+    <div class="frm">
+      <label>類別</label>
+      <select id="rp_type">
+        <option value="cancel">教練甩底/臨時取消</option>
+        <option value="conduct">行為不當</option>
+        <option value="quality">教學質素爭議</option>
+        <option value="payment">付款糾紛</option>
+        <option value="injury">受傷/意外事故</option>
+        <option value="other">其他</option>
+      </select>
+      <label>詳細描述</label>
+      <textarea id="rp_desc" rows="4" placeholder="請描述事情經過、時間、地點…"></textarea>
+      <div class="payinfo" style="background:#FFF0F0;border-color:#FFD0D0">
+        ⚠️ 如涉及對兒童嘅懷疑虐待或不當接觸,平台有責任通知相關執法/福利機構,唔會單靠內部調解處理。
+      </div>
+      <button class="btn danger block" onclick="submitReport('${coachId}','${bookingId}')">提交舉報</button>
+    </div>`;
+  openSheet("reportMask");
+}
+function submitReport(coachId, bookingId){
+  const desc = document.getElementById("rp_desc").value.trim();
+  if(!desc) return toast("請填寫詳細描述");
+  DB.update(db=>{
+    db.reports.push({
+      id:DB.uid(), type:document.getElementById("rp_type").value, desc,
+      reporterRole:"student", reporterName:me.name, reporterId:me.uid,
+      coachId, bookingId, status:"open", createdAt:new Date().toISOString()
+    });
+  });
+  closeSheet("reportMask");
+  toast("已提交,平台會於數日內跟進");
+}
+</script>
+</body>
+</html>
