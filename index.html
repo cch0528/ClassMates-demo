@@ -130,6 +130,12 @@ document.getElementById("regBtn").onclick = doRegister;
 document.getElementById("quickBtn").onclick = async ()=>{
   setAuthLoading(true);
   try{
+    // signInAnonymously()如果本身已經匿名登入緊,唔會開新帳戶,淨係攞返舊嗰個
+    // (連埋佢舊嘅role)。所以要揀嘅role同現有demo帳戶對唔上時,要先登出先再開新嘅。
+    if(fbAuth.currentUser && fbAuth.currentUser.isAnonymous){
+      const existing = await fbGetProfile(fbAuth.currentUser.uid);
+      if(existing && existing.role!==role) await fbAuth.signOut();
+    }
     const cred = await fbAuth.signInAnonymously();
     let profile = await fbGetProfile(cred.user.uid);
     if(!profile){
