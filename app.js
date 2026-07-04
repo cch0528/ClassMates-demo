@@ -1,13 +1,11 @@
 /* ===== ClassMates — shared data layer =====
-   DEMO MODE: 資料存喺 localStorage。
-   之後貼咗 firebaseConfig 落嚟,我哋下一步先正式駁 Firebase (Auth + Firestore + Storage)。
-*/
-const firebaseConfig = {
-  /* TODO: 貼你嘅 firebaseConfig 喺度 */
-};
-
+   Firebase config實際上放喺firebase-init.js。(呢度以前有個重複嘅firebaseConfig
+   placeholder,同firebase-init.js嗰個撞名,兩個<script>共用global scope,
+   令成個app.js一load就SyntaxError冧晒——已刪除。) */
 const LS_KEY = "coachup_db_v1";
 const SESSION_KEY = "coachup_session";
+// 分類/地區/年齡層有更新時,將呢個數字加一,現有瀏覽器嘅cache就會自動refresh返呢幾part
+const SEED_VERSION = 2;
 
 /* ---------- demo/正式 開關 -----------
    main分支要set做false(正式,冇假資料/冇快速登入);
@@ -19,9 +17,10 @@ const FS_PREFIX = IS_DEMO ? "demo_" : "";
 function seedDB(){
   const cats = [
     {id:"water", name:"水上活動", em:"🏊", subs:["游水","滑水","獨木舟","風帆","水肺潛水","SUP直立板"]},
-    {id:"ball",  name:"球類活動", em:"⚽", subs:["籃球","足球","網球","羽毛球","乒乓球","排球","欖球","壁球"]},
+    {id:"ball",  name:"球類活動", em:"⚽", subs:["籃球","足球","美式足球","網球","羽毛球","乒乓球","排球","欖球","壁球"]},
     {id:"track", name:"田徑",    em:"🏃", subs:["跑步","跳遠","跳高","標槍","跨欄"]},
     {id:"music", name:"音樂",    em:"🎵", subs:["鋼琴","結他","鼓","聲樂","小提琴","色士風"]},
+    {id:"tutor", name:"補習",    em:"📚", subs:["中文","英文","數學","科學","通識/公民科","專科補習"]},
     {id:"other", name:"其他",    em:"📦", subs:[]}
   ];
   const regions = ["中西區","灣仔","東區","南區","油尖旺","深水埗","九龍城","黃大仙","觀塘","荃灣","屯門","元朗","北區","大埔","沙田","西貢","葵青","離島"];
@@ -112,16 +111,19 @@ function seedDB(){
 /* ---------- DB helpers ---------- */
 function loadDB(){
   let raw = localStorage.getItem(LS_KEY);
-  if(!raw){ const db = seedDB(); localStorage.setItem(LS_KEY, JSON.stringify(db)); return db; }
+  if(!raw){ const db = seedDB(); db.seedVersion = SEED_VERSION; localStorage.setItem(LS_KEY, JSON.stringify(db)); return db; }
   let db = JSON.parse(raw);
   // 防禦性檢查:如果係舊版/唔完整嘅cache資料(冇cats/regions等),自動補返
-  if(!db.cats || !db.cats.length || !db.regions || !db.ageGroups || !db.reports){
+  const needsBackfill = !db.cats || !db.cats.length || !db.regions || !db.ageGroups || !db.reports;
+  const outdatedTaxonomy = db.seedVersion !== SEED_VERSION;
+  if(needsBackfill || outdatedTaxonomy){
     const fresh = seedDB();
-    db.cats = db.cats && db.cats.length ? db.cats : fresh.cats;
-    db.regions = db.regions && db.regions.length ? db.regions : fresh.regions;
-    db.ageGroups = db.ageGroups && db.ageGroups.length ? db.ageGroups : fresh.ageGroups;
+    db.cats = fresh.cats;
+    db.regions = fresh.regions;
+    db.ageGroups = fresh.ageGroups;
     db.reports = db.reports || [];
     db.settings = db.settings || fresh.settings;
+    db.seedVersion = SEED_VERSION;
     localStorage.setItem(LS_KEY, JSON.stringify(db));
   }
   return db;

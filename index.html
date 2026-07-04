@@ -31,6 +31,7 @@
     <button class="btn primary block" id="loginBtn">登入</button>
     <button class="btn ghost block" id="regBtn">註冊新帳戶</button>
     <button class="btn ghost block" id="quickBtn" style="border-style:dashed">⚡ 快速Demo登入(免Email/密碼)</button>
+    <div class="loadingbar" id="loginLoading"><span></span></div>
   </div>
 
   <div class="hint">
@@ -60,10 +61,17 @@ document.querySelectorAll("#rolepick .rp").forEach(el=>{
 });
 
 /* ---------- Firebase Auth + Firestore profile ---------- */
+function setAuthLoading(on){
+  document.getElementById("loginLoading").classList.toggle("on", on);
+  document.getElementById("loginBtn").disabled = on;
+  document.getElementById("regBtn").disabled = on;
+  document.getElementById("quickBtn").disabled = on;
+}
 async function doLogin(){
   const email = document.getElementById("email").value.trim().toLowerCase();
   const pw = document.getElementById("pw").value;
   if(!email||!pw) return toast("填埋Email同密碼先");
+  setAuthLoading(true);
   try{
     const cred = await fbAuth.signInWithEmailAndPassword(email, pw);
     const profile = await fbGetProfile(cred.user.uid);
@@ -83,6 +91,7 @@ async function doLogin(){
     });
     location.href = dest(profile.role);
   }catch(e){ toast("登入失敗:"+(e.message||e.code)); }
+  finally{ setAuthLoading(false); }
 }
 async function doRegister(){
   const email = document.getElementById("email").value.trim().toLowerCase();
@@ -92,6 +101,7 @@ async function doRegister(){
   if(pw.length<6) return toast("密碼最少6個字");
   if(!name) return toast("填埋你嘅名先");
   if(!document.getElementById("agreeTerms").checked) return toast("要先同意條款及細則");
+  setAuthLoading(true);
   try{
     const cred = await fbAuth.createUserWithEmailAndPassword(email, pw);
     await fbCreateProfile(cred.user.uid, {name, email, role, agreedTermsAt:new Date().toISOString()});
@@ -110,6 +120,7 @@ async function doRegister(){
     toast(role==="coach" ? "已註冊!教練帳戶需等Admin審批先會喺平台出現" : "註冊成功!");
     setTimeout(()=>location.href = dest(role), 900);
   }catch(e){ toast("註冊失敗:"+(e.message||e.code)); }
+  finally{ setAuthLoading(false); }
 }
 
 document.getElementById("loginBtn").onclick = doLogin;
@@ -117,6 +128,7 @@ document.getElementById("regBtn").onclick = doRegister;
 
 /* ---------- 快速Demo登入(用Firebase匿名登入,免Email/密碼但仍然係真Auth,寫得入Firestore) ---------- */
 document.getElementById("quickBtn").onclick = async ()=>{
+  setAuthLoading(true);
   try{
     const cred = await fbAuth.signInAnonymously();
     let profile = await fbGetProfile(cred.user.uid);
@@ -141,6 +153,7 @@ document.getElementById("quickBtn").onclick = async ()=>{
     if(newCoach) FS.pushCoach(newCoach);
     location.href = dest(profile.role);
   }catch(e){ toast("快速登入失敗:"+(e.message||e.code)+"(可能未開Anonymous登入方式)"); }
+  finally{ setAuthLoading(false); }
 };
 </script>
 </body>

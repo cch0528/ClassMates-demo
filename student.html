@@ -21,6 +21,7 @@
   <div class="page on" id="pg-home">
     <div class="search">
       <input id="q" placeholder="搜尋教練 / 活動…" oninput="doSearch()">
+      <span class="search-clear" id="qClear" onclick="clearSearch()">✕</span>
     </div>
     <div id="searchResults"></div>
 
@@ -62,6 +63,10 @@
   </div></div>
 </div>
 
+<!-- 篩選 sheet -->
+<div class="sheet-mask" id="filterMask" onclick="if(event.target===this)closeSheet('filterMask')">
+  <div class="sheet" id="filterSheet"></div>
+</div>
 <!-- 教練詳情 sheet -->
 <div class="sheet-mask" id="detailMask" onclick="if(event.target===this)closeSheet('detailMask')">
   <div class="sheet" id="detailSheet"></div>
@@ -128,6 +133,7 @@ function doSearch(){
   const q = document.getElementById("q").value.trim().toLowerCase();
   const res = document.getElementById("searchResults");
   const home = document.getElementById("homeBody");
+  document.getElementById("qClear").classList.toggle("on", !!q);
   if(!q){ res.innerHTML=""; home.style.display=""; return; }
   home.style.display="none";
   const db = DB.get();
@@ -136,6 +142,10 @@ function doSearch(){
   res.innerHTML = hits.length
     ? `<div class="sec-title">搜尋結果</div><div class="clist">${hits.map(coachCard).join("")}</div>`
     : `<div class="empty">搵唔到「${q}」相關嘅教練</div>`;
+}
+function clearSearch(){
+  document.getElementById("q").value = "";
+  doSearch();
 }
 
 /* ---------- browse: cat → sub → list ---------- */
@@ -172,31 +182,40 @@ function backCrumb(){
   if(curSub){ showSubs(); }
   else nav("home", document.querySelector('.bottomnav button[data-p="home"]'));
 }
+const PRICE_BANDS = [1000, 200, 250, 300, 350, 400, 500];
+const RATING_OPTS = [0, 3, 4, 4.5];
 function renderFilters(){
-  const db = DB.get();
   const el = document.getElementById("filters");
   el.innerHTML = `
-    <div class="fchip ${flt.regions.length?"on":""}" onclick="pickRegions()">📍 地區${flt.regions.length?` (${flt.regions.length})`:""}</div>
-    <div class="fchip ${flt.maxPrice<1000?"on":""}" onclick="pickPrice()">💰 ≤$${flt.maxPrice}</div>
-    <div class="fchip ${flt.minRating>0?"on":""}" onclick="cycleRating()">⭐ ${flt.minRating>0?flt.minRating+"星以上":"評分"}</div>
+    <div class="fchip ${flt.regions.length?"on":""}" onclick="openFilterSheet()">📍 地區${flt.regions.length?` (${flt.regions.length})`:""}</div>
+    <div class="fchip ${flt.maxPrice<1000?"on":""}" onclick="openFilterSheet()">💰 ${flt.maxPrice<1000?"≤$"+flt.maxPrice:"價錢"}</div>
+    <div class="fchip ${flt.minRating>0?"on":""}" onclick="openFilterSheet()">⭐ ${flt.minRating>0?flt.minRating+"星以上":"評分"}</div>
     ${(flt.regions.length||flt.maxPrice<1000||flt.minRating>0)?'<div class="fchip" onclick="clearFlt()">✕ 清除</div>':""}`;
 }
-function pickRegions(){
+function openFilterSheet(){
   const db = DB.get();
-  const cur = flt.regions.join(",");
-  const input = prompt("輸入地區(可多個,用逗號分隔):\n"+db.regions.join("、"), cur);
-  if(input===null) return;
-  flt.regions = input.split(/[,、]/).map(s=>s.trim()).filter(s=>db.regions.includes(s));
-  renderFilters(); renderList();
+  document.getElementById("filterSheet").innerHTML = `
+    <div class="grab"></div>
+    <h2>篩選</h2>
+    <div class="frm">
+      <label>地區(可揀多個)</label>
+      <div class="checklist" id="f_regions">${db.regions.map(r=>`
+        <label><input type="checkbox" value="${r}" ${flt.regions.includes(r)?"checked":""}> ${r}</label>`).join("")}</div>
+      <label>最高時薪</label>
+      <select id="f_price">${PRICE_BANDS.map(p=>`
+        <option value="${p}" ${flt.maxPrice===p?"selected":""}>${p===1000?"不限":"≤$"+p}</option>`).join("")}</select>
+      <label>最低評分</label>
+      <select id="f_rating">${RATING_OPTS.map(r=>`
+        <option value="${r}" ${flt.minRating===r?"selected":""}>${r===0?"不限":r+"星以上"}</option>`).join("")}</select>
+      <button class="btn primary block" onclick="applyFilters()">套用篩選</button>
+    </div>`;
+  openSheet("filterMask");
 }
-function pickPrice(){
-  const v = prompt("最高時薪($):", flt.maxPrice);
-  if(v===null) return;
-  flt.maxPrice = Math.max(0, parseInt(v)||1000);
-  renderFilters(); renderList();
-}
-function cycleRating(){
-  flt.minRating = {0:4, 4:3, 3:0}[flt.minRating];
+function applyFilters(){
+  flt.regions = [...document.querySelectorAll('#f_regions input:checked')].map(x=>x.value);
+  flt.maxPrice = parseInt(document.getElementById("f_price").value);
+  flt.minRating = parseFloat(document.getElementById("f_rating").value);
+  closeSheet("filterMask");
   renderFilters(); renderList();
 }
 function clearFlt(){ flt={regions:[],maxPrice:1000,minRating:0}; renderFilters(); renderList(); }
